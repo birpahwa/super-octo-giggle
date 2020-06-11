@@ -1,0 +1,75 @@
+
+from email.parser import Parser
+import re
+import time
+from datetime import datetime, timezone, timedelta
+
+def date_to_dt(date):
+    def to_dt(tms):
+        def tz():
+            return timezone(timedelta(seconds=tms.tm_gmtoff))
+        return datetime(tms.tm_year, tms.tm_mon, tms.tm_mday, 
+                      tms.tm_hour, tms.tm_min, tms.tm_sec, 
+                      tzinfo=tz())
+    return to_dt(time.strptime(date[:-6], '%a, %d %b %Y %H:%M:%S %z'))
+
+def utf8_decode_and_filter(rdd):
+    def utf_decode(s):
+        try:
+          return str(s, 'utf-8')
+        except:
+            pass
+    return rdd.map(lambda x: utf_decode(x[1])).filter(lambda x: x != None)
+
+
+rdd_seq = utf8_decode_and_filter(sc.sequenceFile('/user/mhac060/Project/enron-full'))
+
+# Q1: replace pass with your code
+def extract_email_network(rdd):
+    def fun(x):
+        for i in x[1]:
+            yield (x[0],i,x[2])
+    
+    rdd_mail = rdd.map(lambda x: Parser().parsestr(x))
+    rdd_full_email_tuples = rdd_mail.map(lambda x: (x.get('From'),[ x.strip() for x in str(x.get('To')).split(',') + str(x.get('Cc')).split(',') + str(x.get('Bcc')).split(',') ],date_to_dt(x.get('Date'))))
+    
+    rdd_email_triples = rdd_full_email_tuples.flatMap(lambda x: list(fun(x)))
+    email_regex = '(^[.A-Z0-9a-z]+@[a-z/.]*enron.com$)'
+    rdd_email_triples_enron = rdd_email_triples.filter(lambda x: True if re.compile(email_regex).fullmatch(x[0]) else False).filter(lambda x: True if re.compile(email_regex).fullmatch(x[1]) else False)
+    distinct_triples = rdd_email_triples_enron.distinct()
+    return(distinct_triples)
+
+# Q2: replace pass with your code
+def convert_to_weighted_network(rdd, drange=None):
+    rdd = rdd.map(lambda x:(x[0],x[1],x[2].replace(tzinfo = timezone.utc))).filter(lambda x: x[0]!=x[1])
+    if drange is not None:
+        rdd = rdd.filter(lambda x: x[2]>drange[0] and x[2]<drange[1])
+        weightage = rdd.map(lambda x: ((x[0],x[1]),1))\
+        .reduceByKey(lambda _,__: _+__)\
+        .map(lambda x: (x[0][0],x[0][1],x[1]))
+        return weightage
+    
+
+# Q3.1: replace pass with your code
+def get_out_degrees(rdd):
+    rdd = rdd.map(lambda x: (x[0],x[2])).reduceByKey(lambda _,__: _+__).union(rdd.map(lambda x : (x[1],0)))
+    rdd = rdd.reduceByKey(lambda _,__: _+__).map(lambda x : (x[1],x[0])).sortByKey(False)
+    return rdd
+
+# Q3.2: replace pass with your code         
+def get_in_degrees(rdd):
+    rdd = rdd.map(lambda x: (x[1],x[2])).reduceByKey(lambda _,__: _+__).union(rdd.map(lambda x: (x[0],0)))
+    rdd = rdd.reduceByKey(lambda _,__: _+__).map(lambda x: (x[1],x[0])).sortByKey(False)
+    return rdd
+
+# Q4.1: replace pass with your code            
+def get_out_degree_dist(rdd):
+    rdd = rdd.map(lambda x: (x[0],x[2])).reduceByKey(lambda _,__: _+__).union(rdd.map(lambda x: (x[1],0)))
+    rdd=rdd.reduceByKey(lambda _,__: _+__).map(lambda x: (x[1],x[0])).map(lambda x: (x[0],1)).reduceByKey( lambda _,__: _+__)  
+    return rdd.sortByKey()
+
+# Q4.2: replace pass with your code
+def get_in_degree_dist(rdd):
+    rdd = rdd.map(lambda x: (x[1],x[2])).reduceByKey(lambda _,__: _+__).union(rdd.map(lambda x: (x[0],0)))
+    rdd = rdd.reduceByKey(lambda _,__: _+__).map(lambda x: (x[1],x[0])).map(lambda x : (x[0],1)).reduceByKey(lambda _,__: _+__)
+    return rdd.sortByKey()
